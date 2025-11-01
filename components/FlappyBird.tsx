@@ -12,10 +12,10 @@ interface Obstacle {
   passed: boolean;
 }
 
-const GRAVITY = 0.5;
-const JUMP_STRENGTH = -8;
+const GRAVITY = 0.35;
+const JUMP_STRENGTH = -7;
 const OBSTACLE_SPEED = 3;
-const OBSTACLE_SPACING = 200;
+const OBSTACLE_SPACING = 300;
 const OBSTACLE_WIDTH = 60;
 const PLAYER_SIZE = 50;
 const GAP_SIZE = 150;
