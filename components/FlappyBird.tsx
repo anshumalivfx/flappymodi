@@ -12,13 +12,13 @@ interface Obstacle {
   passed: boolean;
 }
 
-const GRAVITY = 0.35;
-const JUMP_STRENGTH = -7;
-const OBSTACLE_SPEED = 3;
-const OBSTACLE_SPACING = 300;
+const GRAVITY = 0.3;
+const JUMP_STRENGTH = -6;
+const OBSTACLE_SPEED = 2;
+const OBSTACLE_SPACING = 450;
 const OBSTACLE_WIDTH = 60;
 const PLAYER_SIZE = 50;
-const GAP_SIZE = 150;
+const GAP_SIZE = 200;
 
 export default function FlappyBird() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -32,6 +32,8 @@ export default function FlappyBird() {
   const playerVelocityRef = useRef(0);
   const obstaclesRef = useRef<Obstacle[]>([]);
   const obstacleIdRef = useRef(0);
+  const gameStartTimeRef = useRef<number>(0);
+  const lastFrameTimeRef = useRef<number>(0);
   const animationFrameRef = useRef<number | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -158,12 +160,16 @@ export default function FlappyBird() {
     obstaclesRef.current = [];
     obstacleIdRef.current = 0;
     scoreRef.current = 0;
+    gameStartTimeRef.current = 0;
+    lastFrameTimeRef.current = 0;
     setScore(0);
     setShowJumpscare(false);
   }, []);
 
   const startGame = useCallback(() => {
     resetGame();
+    gameStartTimeRef.current = Date.now();
+    lastFrameTimeRef.current = Date.now();
     setGameState("playing");
     if (audioRef.current) {
       audioRef.current.play().catch((err: Error) => {
@@ -310,39 +316,43 @@ export default function FlappyBird() {
       const canvas = canvasRef.current;
       if (!canvas) return false;
 
-      // Check bounds
-      if (playerY < 0 || playerY + PLAYER_SIZE > canvas.height) {
+      // Grace period: no collision for first 1.5 seconds
+      const timeSinceStart = Date.now() - gameStartTimeRef.current;
+      if (timeSinceStart < 1500) {
+        return false;
+      }
+
+      // More forgiving boundary check with margin
+      if (playerY < -10 || playerY + PLAYER_SIZE > canvas.height + 10) {
         return true;
       }
 
-      // Check obstacle collisions with pixel-perfect detection
+      // More forgiving hitbox - reduce player collision box by 20%
+      const hitboxMargin = PLAYER_SIZE * 0.2;
+      const adjustedPlayerX = playerX + hitboxMargin;
+      const adjustedPlayerY = playerY + hitboxMargin;
+      const adjustedPlayerSize = PLAYER_SIZE - (hitboxMargin * 2);
+
+      // Check obstacle collisions with more forgiving detection
       for (const obstacle of obstaclesRef.current) {
         const obstacleImage = obstacleImagesRef.current[obstacle.imageIndex];
 
         if (obstacleImage?.complete) {
-          // Check collision with top obstacle
-          const topCollision = checkPixelCollision(
-            playerX,
-            playerY,
-            obstacle.x,
-            0,
-            obstacle.topHeight,
-            obstacle.imageIndex
-          );
+          // Check if player is horizontally overlapping with obstacle
+          if (
+            adjustedPlayerX + adjustedPlayerSize > obstacle.x &&
+            adjustedPlayerX < obstacle.x + OBSTACLE_WIDTH
+          ) {
+            // Check collision with top obstacle (with 5px grace margin)
+            if (adjustedPlayerY < obstacle.topHeight - 5) {
+              return true;
+            }
 
-          // Check collision with bottom obstacle
-          const bottomY = obstacle.topHeight + GAP_SIZE;
-          const bottomCollision = checkPixelCollision(
-            playerX,
-            playerY,
-            obstacle.x,
-            bottomY,
-            obstacle.bottomHeight,
-            obstacle.imageIndex
-          );
-
-          if (topCollision || bottomCollision) {
-            return true;
+            // Check collision with bottom obstacle (with 5px grace margin)
+            const bottomY = obstacle.topHeight + GAP_SIZE;
+            if (adjustedPlayerY + adjustedPlayerSize > bottomY + 5) {
+              return true;
+            }
           }
         }
       }
@@ -362,9 +372,19 @@ export default function FlappyBird() {
     // Don't run game loop during jumpscare
     if (showJumpscare) return;
 
-    // Update player
-    playerVelocityRef.current += GRAVITY;
-    playerYRef.current += playerVelocityRef.current;
+    // Calculate delta time for frame rate independence
+    const currentTime = Date.now();
+    const deltaTime = lastFrameTimeRef.current === 0 
+      ? 16.67 // First frame assumes 60fps
+      : Math.min(currentTime - lastFrameTimeRef.current, 50); // Cap at 50ms to prevent huge jumps
+    lastFrameTimeRef.current = currentTime;
+    
+    // Normalize to 60fps (16.67ms per frame)
+    const timeScale = deltaTime / 16.67;
+
+    // Update player with time scaling
+    playerVelocityRef.current += GRAVITY * timeScale;
+    playerYRef.current += playerVelocityRef.current * timeScale;
 
     // Create new obstacles
     const lastObstacle = obstaclesRef.current[obstaclesRef.current.length - 1];
@@ -381,9 +401,9 @@ export default function FlappyBird() {
       });
     }
 
-    // Update obstacles
+    // Update obstacles with time scaling
     obstaclesRef.current = obstaclesRef.current
-      .map((obs: Obstacle) => ({ ...obs, x: obs.x - OBSTACLE_SPEED }))
+      .map((obs: Obstacle) => ({ ...obs, x: obs.x - (OBSTACLE_SPEED * timeScale) }))
       .filter((obs: Obstacle) => obs.x + OBSTACLE_WIDTH > 0);
 
     // Check score
